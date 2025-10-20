@@ -1,0 +1,67 @@
+name: Waydroid Headless (24/7)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  waydroid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          sudo apt update
+          sudo apt install -y curl lxc lxd qemu-kvm qemu-utils x11vnc xvfb net-tools git unzip
+          mkdir -p ~/waydroid-vm ~/waydroid-novnc
+
+      - name: Install Waydroid
+        run: |
+          curl https://repo.waydro.id | sudo bash
+          sudo apt install -y waydroid
+          sudo waydroid init
+
+      - name: Create persistent data directory
+        run: |
+          mkdir -p ~/waydroid-vm/data
+
+      - name: Start headless Waydroid
+        run: |
+          Xvfb :1 -screen 0 1280x720x16 &
+          export DISPLAY=:1
+          sudo waydroid container start
+          sudo waydroid session start
+
+      - name: Start VNC server
+        run: |
+          export DISPLAY=:1
+          x11vnc -display :1 -nopw -listen 0.0.0.0 -xkb -forever &
+
+      - name: Setup noVNC
+        run: |
+          cd ~/waydroid-novnc
+          if [ ! -d noVNC ]; then
+            git clone https://github.com/novnc/noVNC.git
+          fi
+          cd noVNC
+          ./utils/novnc_proxy --vnc localhost:5900 --listen 8080 &
+
+      - name: Keep VM alive
+        run: |
+          echo "=== Waydroid VM Running ==="
+          echo "Access Android GUI via browser at port 8080"
+          echo "Persistent data folder: ~/waydroid-vm/data"
+          while true; do
+            echo "Waydroid running..."
+            sleep 300
+          done
+
+      - name: Save persistent data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waydroid-data
+          path: ~/waydroid-vm/data
