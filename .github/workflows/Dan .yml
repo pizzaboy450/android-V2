@@ -1,7 +1,9 @@
-name: Waydroid Headless (Persistent)
+name: Linux Waydroid (24/7)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"  # runs every 6 hours
 
 jobs:
   waydroid:
@@ -9,67 +11,48 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      # 1️⃣ Restore previous Waydroid data
-      - name: Restore Waydroid Data
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore Waydroid data
         uses: actions/download-artifact@v4
-        continue-on-error: true as
+        continue-on-error: true
         with:
           name: waydroid-data
           path: $HOME/.local/share/waydroid
 
-      # 2️⃣ Install dependencies
-      - name: Install Waydroid Dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y curl lxc lxd python3-pip qemu-utils
-          sudo systemctl start lxd || true
-          sudo lxd waitready || true
+          sudo apt install -y curl lxc lxd
 
-      # 3️⃣ Install Waydroid
       - name: Install Waydroid
         run: |
           curl https://repo.waydro.id | sudo bash
           sudo apt install -y waydroid
 
-      # 4️⃣ Initialize Waydroid container if needed
       - name: Initialize Waydroid
         run: |
-          if ! waydroid status | grep -q "running"; then
-            sudo waydroid init
-          fi
+          sudo waydroid init || true  # skip if already initialized
 
-      # 5️⃣ Start Waydroid container
-      - name: Start Waydroid
+      - name: Start Waydroid container
         run: |
-          sudo waydroid container start
-          sudo waydroid session start
+          sudo waydroid container start || true
 
-      # 6️⃣ Install noVNC to expose GUI
-      - name: Setup noVNC
+      - name: Start Waydroid session
         run: |
-          sudo apt install -y novnc websockify x11vnc xvfb
-          Xvfb :1 -screen 0 1024x768x16 &
-          x11vnc -display :1 -nopw -forever -shared -rfbport 5901 &
-          nohup websockify --web=/usr/share/novnc/ 8080 localhost:5901 &
+          sudo waydroid session start || true
 
-      # 7️⃣ Output connection info
-      - name: Show Connection Info
-        run: |
-          echo "Waydroid GUI available at: http://<runner-ip>:8080"
-          echo "VNC port: 5901 (no password)"
-
-      # 8️⃣ Keep the runner alive
-      - name: Keep Alive
-        run: |
-          while true; do
-            echo "Waydroid running..."
-            sleep 300
-          done
-
-      # 9️⃣ Save Waydroid data for next run
-      - name: Save Waydroid Data
+      - name: Save Waydroid data
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: waydroid-data
           path: $HOME/.local/share/waydroid
+
+      - name: Keep workflow running
+        run: |
+          while true; do
+            echo "Waydroid running..."
+            sleep 300
+          done
