@@ -1,4 +1,4 @@
-name: Waydroid Headless (24/7)
+name: Waydroid Headless (Persistent)
 
 on:
   workflow_dispatch:
@@ -6,62 +6,70 @@ on:
 jobs:
   waydroid:
     runs-on: ubuntu-latest
-    timeout-minutes: 720
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      # 1️⃣ Restore previous Waydroid data
+      - name: Restore Waydroid Data
+        uses: actions/download-artifact@v4
+        continue-on-error: true as
+        with:
+          name: waydroid-data
+          path: $HOME/.local/share/waydroid
 
-      - name: Setup environment
+      # 2️⃣ Install dependencies
+      - name: Install Waydroid Dependencies
         run: |
           sudo apt update
-          sudo apt install -y curl lxc lxd qemu-kvm qemu-utils x11vnc xvfb net-tools git unzip
-          mkdir -p ~/waydroid-vm ~/waydroid-novnc
+          sudo apt install -y curl lxc lxd python3-pip qemu-utils
+          sudo systemctl start lxd || true
+          sudo lxd waitready || true
 
+      # 3️⃣ Install Waydroid
       - name: Install Waydroid
         run: |
           curl https://repo.waydro.id | sudo bash
           sudo apt install -y waydroid
-          sudo waydroid init
 
-      - name: Create persistent data directory
+      # 4️⃣ Initialize Waydroid container if needed
+      - name: Initialize Waydroid
         run: |
-          mkdir -p ~/waydroid-vm/data
+          if ! waydroid status | grep -q "running"; then
+            sudo waydroid init
+          fi
 
-      - name: Start headless Waydroid
+      # 5️⃣ Start Waydroid container
+      - name: Start Waydroid
         run: |
-          Xvfb :1 -screen 0 1280x720x16 &
-          export DISPLAY=:1
           sudo waydroid container start
           sudo waydroid session start
 
-      - name: Start VNC server
-        run: |
-          export DISPLAY=:1
-          x11vnc -display :1 -nopw -listen 0.0.0.0 -xkb -forever &
-
+      # 6️⃣ Install noVNC to expose GUI
       - name: Setup noVNC
         run: |
-          cd ~/waydroid-novnc
-          if [ ! -d noVNC ]; then
-            git clone https://github.com/novnc/noVNC.git
-          fi
-          cd noVNC
-          ./utils/novnc_proxy --vnc localhost:5900 --listen 8080 &
+          sudo apt install -y novnc websockify x11vnc xvfb
+          Xvfb :1 -screen 0 1024x768x16 &
+          x11vnc -display :1 -nopw -forever -shared -rfbport 5901 &
+          nohup websockify --web=/usr/share/novnc/ 8080 localhost:5901 &
 
-      - name: Keep VM alive
+      # 7️⃣ Output connection info
+      - name: Show Connection Info
         run: |
-          echo "=== Waydroid VM Running ==="
-          echo "Access Android GUI via browser at port 8080"
-          echo "Persistent data folder: ~/waydroid-vm/data"
+          echo "Waydroid GUI available at: http://<runner-ip>:8080"
+          echo "VNC port: 5901 (no password)"
+
+      # 8️⃣ Keep the runner alive
+      - name: Keep Alive
+        run: |
           while true; do
             echo "Waydroid running..."
             sleep 300
           done
 
-      - name: Save persistent data
+      # 9️⃣ Save Waydroid data for next run
+      - name: Save Waydroid Data
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: waydroid-data
-          path: ~/waydroid-vm/data
+          path: $HOME/.local/share/waydroid
