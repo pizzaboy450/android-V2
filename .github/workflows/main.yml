@@ -1,0 +1,58 @@
+name: Linux Waydroid (24/7)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"  # runs every 6 hours
+
+jobs:
+  waydroid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore Waydroid data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: waydroid-data
+          path: $HOME/.local/share/waydroid
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y curl lxc lxd
+
+      - name: Install Waydroid
+        run: |
+          curl https://repo.waydro.id | sudo bash
+          sudo apt install -y waydroid
+
+      - name: Initialize Waydroid
+        run: |
+          sudo waydroid init || true  # skip if already initialized
+
+      - name: Start Waydroid container
+        run: |
+          sudo waydroid container start || true
+
+      - name: Start Waydroid session
+        run: |
+          sudo waydroid session start || true
+
+      - name: Save Waydroid data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waydroid-data
+          path: $HOME/.local/share/waydroid
+
+      - name: Keep workflow running
+        run: |
+          while true; do
+            echo "Waydroid running..."
+            sleep 300
+          done
